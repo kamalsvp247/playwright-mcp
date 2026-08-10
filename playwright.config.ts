@@ -1,5 +1,4 @@
 import { defineConfig, devices } from '@playwright/test';
-
 export default defineConfig({
   testDir: './tests', // Update to your test directory
   fullyParallel: true,
@@ -8,7 +7,9 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: process.env.BASE_URL,
+    baseURL: process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : process.env.BASE_URL || 'https://playwright-mcp-chi.vercel.app/',
     trace: 'on-first-retry',
   },
   projects: [

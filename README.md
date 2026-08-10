@@ -34,3 +34,29 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployed Preview
+
+This app is deployed at: https://playwright-mcp-chi.vercel.app/
+
+### Endform setup
+
+1. Authenticate with Endform:
+```bash
+npx endform@latest login
+```
+
+2. Run tests against the deployed preview:
+
+Windows:
+```bash
+set "VERCEL_URL=playwright-mcp-chi.vercel.app" && npx endform@latest test
+```
+
+macOS/Linux:
+```bash
+VERCEL_URL=playwright-mcp-chi.vercel.app npx endform@latest test
+```
+
+The Playwright config now reads `process.env.VERCEL_URL` and falls back to `process.env.BASE_URL` or `https://playwright-mcp-chi.vercel.app/`.
+
+> Note: `endform` CLI does not support native Windows `win32` in some environments, so use WSL, Linux, or macOS if needed.

@@ -30,6 +30,11 @@ jobs:
           version: 8
           run_install: true
 
+      - name: Ensure Playwright Test runner is installed
+        run: |
+          echo "Installing @playwright/test to satisfy Endform runtime"
+          npm install --no-audit --no-fund @playwright/test@^1.51.1
+
       - name: Wait for Vercel deployment
         uses: endformdev/actions/run-with-vercel-deployment@main
         with:

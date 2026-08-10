@@ -26,10 +26,10 @@ export default defineConfig({
       use: { ...devices['Desktop Safari'] },
     },
   ],
-  webServer: {
-    // Configure if you need to run a dev server
-    // command: 'npm run dev',
-    // url: 'http://localhost:3000',
-    // reuseExistingServer: !process.env.CI,
-  },
+  // Configure if you need to run a dev server
+  // webServer: {
+  //   command: 'npm run dev',
+  //   url: 'http://localhost:3000',
+  //   reuseExistingServer: !process.env.CI,
+  // },
 })

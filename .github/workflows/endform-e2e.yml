@@ -33,7 +33,7 @@ jobs:
       - name: Wait for Vercel deployment
         uses: endformdev/actions/run-with-vercel-deployment@main
         with:
-          project-name: playwright-mcp
+          project-name: playwright-mcp-chi
           set-url-env-var: BASE_URL
 
       - name: Run end to end tests with endform

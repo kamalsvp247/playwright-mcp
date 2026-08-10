@@ -38,16 +38,25 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 This app is deployed at: https://playwright-mcp-chi.vercel.app/
 
-To run Playwright tests against the deployed site, set `BASE_URL` and execute Playwright:
+### Endform setup
+
+1. Authenticate with Endform:
+```bash
+npx endform@latest login
+```
+
+2. Run tests against the deployed preview:
 
 Windows:
 ```bash
-set "BASE_URL=https://playwright-mcp-chi.vercel.app/" && npx playwright test
+set "VERCEL_URL=playwright-mcp-chi.vercel.app" && npx endform@latest test
 ```
 
 macOS/Linux:
 ```bash
-BASE_URL=https://playwright-mcp-chi.vercel.app/ npx playwright test
+VERCEL_URL=playwright-mcp-chi.vercel.app npx endform@latest test
 ```
 
-The Playwright config already reads `process.env.BASE_URL` from `playwright.config.ts`.
+The Playwright config now reads `process.env.VERCEL_URL` and falls back to `process.env.BASE_URL` or `https://playwright-mcp-chi.vercel.app/`.
+
+> Note: `endform` CLI does not support native Windows `win32` in some environments, so use WSL, Linux, or macOS if needed.

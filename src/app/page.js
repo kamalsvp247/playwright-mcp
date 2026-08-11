@@ -21,6 +21,42 @@ function toIsoDate(v) {
   if (m) return `${m[3]}-${m[2]}-${m[1]}`;
   return s.slice(0, 10);
 }
+// POST /api/auth/login is non-blocking: it starts the Playwright login in the
+// background and returns instantly (202, status:"started"). This helper kicks it
+// off, then polls GET /api/auth/status until the login finishes or ~5.5 minutes
+// pass, so the UI never holds a long HTTP request (which clients/proxies kill
+// with HTTP 499 after ~45-60s).
+async function startLoginAndPoll() {
+  const res = await fetch('/api/auth/login', { method: 'POST' });
+  const json = await res.json().catch(() => ({}));
+
+  // Login already complete / nothing was started (e.g. "Already logged in.").
+  if (json.success && json.status !== 'started' && json.status !== 'running') {
+    return { success: true, loggedIn: true, message: json.message || 'Already logged in.' };
+  }
+  // Not accepted and not an in-progress background login → hard failure.
+  if (!json.success && json.status !== 'running') {
+    return { success: false, loggedIn: false, message: json.error || json.message || 'SVP sign-in failed. Try again.' };
+  }
+
+  // Background login is running (started by this request or a previous one) → poll.
+  const deadline = Date.now() + 5 * 60 * 1000 + 30000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 4000));
+    try {
+      const sRes = await fetch('/api/auth/status');
+      const sJson = await sRes.json();
+      const data = sJson?.data || {};
+      if (data.loggedIn) return { success: true, loggedIn: true, message: 'SVP sign-in successful.' };
+      const st = data.login?.status;
+      if (st === 'success') return { success: true, loggedIn: true, message: data.login?.message || 'SVP sign-in successful.' };
+      if (st === 'error' || st === 'timeout') {
+        return { success: false, loggedIn: false, message: data.login?.message || 'SVP sign-in failed. Try again.' };
+      }
+    } catch {}
+  }
+  return { success: false, loggedIn: false, message: 'SVP sign-in timed out. Check the VNC viewer and retry.' };
+}
 
 // Exact SVP booking-wizard language filter (chunk 8189 handleUpdateLanguageList /
 // 7083 fetchReservationDetails). Bangladesh = country exam_type 'both', in_person
@@ -209,14 +245,13 @@ function LoginPanel({ onLogin, onDisconnect, authStatus, setAuthStatus, compact 
     setError('');
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', { method: 'POST' });
-      const json = await res.json();
-      if (json.success) {
+      const result = await startLoginAndPoll();
+      if (result.success) {
         setAuthStatus({ loggedIn: true });
         fetchProfile();
         onLogin();
       } else {
-        setError(json.error || 'Login failed.');
+        setError(result.message || 'Login failed.');
       }
     } catch {
       setError('Connection error.');
@@ -888,14 +923,13 @@ export default function Home() {
   async function handleSvpSignIn() {
     setSvpLoginLoading(true);
     try {
-      const res = await fetch('/api/auth/login', { method: 'POST' });
-      const json = await res.json();
-      if (json.success) {
+      const result = await startLoginAndPoll();
+      if (result.success) {
         setAuthStatus({ loggedIn: true });
         setDatesError('');
         setDatesReloadKey(k => k + 1);
       } else {
-        setDatesError(json.error || 'SVP sign-in failed. Try again.');
+        setDatesError(result.message || 'SVP sign-in failed. Try again.');
       }
     } catch (e) {
       setDatesError(e?.message || 'Connection error while signing in.');

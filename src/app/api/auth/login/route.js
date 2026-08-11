@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
-import { login } from '@/lib/svp-playwright';
+import { startLogin } from '@/lib/svp-playwright';
 
 export const dynamic = 'force-dynamic';
 
+// Non-blocking login: kicks off the Playwright flow in the background and
+// returns immediately (202 + status:"started"). Clients poll
+// GET /api/auth/status (data.login) until it finishes. This avoids long-held
+// HTTP requests that clients/proxies drop with HTTP 499 after ~45-60s.
 export async function POST(request) {
   let body = {};
   try {
@@ -12,8 +16,9 @@ export async function POST(request) {
   }
   const { email, password, otp, recaptchaToken } = body || {};
   try {
-    const result = await login({ email, password, otp, recaptchaToken });
-    return NextResponse.json(result);
+    const result = startLogin({ email, password, otp, recaptchaToken });
+    const status = (result.status === 'started' || result.status === 'running') ? 202 : 200;
+    return NextResponse.json(result, { status });
   } catch (error) {
     console.error('[auth/login] Error:', error.message);
     return NextResponse.json(

@@ -201,11 +201,95 @@ async function closeManagedBrowser() {
 
 // ─── Login (Browser-based; automated when credentials are set) ──
 
+// Blocking login (programmatic use). The HTTP routes use startLogin() so the
+// request never blocks for the full 5-minute browser flow (clients/proxies
+// drop long-held requests with HTTP 499).
 export function login(options = {}) {
   if (checkLoggedIn()) {
     return { success: true, message: 'Already logged in.' };
   }
   return doLogin(options);
+}
+
+// ─── Async Login Manager ─────────────────────────────────────────
+// POST /api/auth/login kicks off doLogin() in the background and returns
+// immediately (202, status: "started"). Clients poll GET /api/auth/status,
+// whose data.login reflects this state, until the flow finishes.
+
+let activeLoginPromise = null;
+
+const loginState = {
+  status: 'idle', // 'idle' | 'running' | 'success' | 'error' | 'timeout'
+  startedAt: null,
+  finishedAt: null,
+  message: '',
+  lastResult: null
+};
+
+export function getLoginStatus() {
+  return {
+    status: loginState.status,
+    startedAt: loginState.startedAt,
+    finishedAt: loginState.finishedAt,
+    message: loginState.message,
+    lastResult: loginState.lastResult
+  };
+}
+
+// Start the login flow in the background. Returns immediately.
+export function startLogin(options = {}) {
+  if (checkLoggedIn()) {
+    return { success: true, status: 'idle', message: 'Already logged in.' };
+  }
+  if (activeLoginPromise) {
+    return { success: false, status: 'running', message: 'A login is already in progress. Poll GET /api/auth/status for progress.' };
+  }
+
+  const email = resolveCredential(options.email, 'SVP_EMAIL');
+  const password = resolveCredential(options.password, 'SVP_PASSWORD');
+  const otp = resolveCredential(options.otp, 'SVP_OTP');
+  const recaptchaToken = resolveCredential(options.recaptchaToken, 'SVP_RECAPTCHA_TOKEN');
+  const hasAutoCreds = !!(email || password || otp || recaptchaToken);
+
+  loginState.status = 'running';
+  loginState.startedAt = new Date().toISOString();
+  loginState.finishedAt = null;
+  loginState.message = hasAutoCreds
+    ? 'Login started in background; automating the SVP login form...'
+    : 'Login started in background; finish it manually in the VNC viewer if the form was not auto-filled...';
+  loginState.lastResult = null;
+
+  activeLoginPromise = doLogin({ email, password, otp, recaptchaToken })
+    .then((result) => {
+      activeLoginPromise = null;
+      loginState.finishedAt = new Date().toISOString();
+      loginState.lastResult = result;
+      if (result.success) {
+        loginState.status = 'success';
+        loginState.message = 'Login successful.';
+      } else if (String(result.error || '').includes('timed out')) {
+        loginState.status = 'timeout';
+        loginState.message = result.error;
+      } else {
+        loginState.status = 'error';
+        loginState.message = result.error || 'Login failed.';
+      }
+      return result;
+    })
+    .catch((err) => {
+      activeLoginPromise = null;
+      loginState.finishedAt = new Date().toISOString();
+      loginState.status = 'error';
+      loginState.message = err.message || 'Login failed with an unexpected error.';
+      loginState.lastResult = { success: false, error: loginState.message };
+      return loginState.lastResult;
+    });
+
+  return {
+    success: true,
+    status: 'started',
+    message: 'Login started in background. Poll GET /api/auth/status for progress.'
+  };
 }
 
 // Resolve a credential from the request body first, then env vars.

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { isLoggedIn, getToken } from '@/lib/svp-playwright';
+import { isLoggedIn, getToken, getLoginStatus } from '@/lib/svp-playwright';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +24,10 @@ export async function GET() {
       success: true,
       data: {
         loggedIn,
-        tokenInfo
+        tokenInfo,
+        // Async login progress (see src/lib/svp-playwright.js startLogin).
+        // status: 'idle' | 'running' | 'success' | 'error' | 'timeout'
+        login: getLoginStatus()
       }
     });
   } catch (error) {

@@ -2,19 +2,23 @@ FROM node:22-bookworm
 
 WORKDIR /app
 
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PORT=8080 \
+    HOSTNAME=0.0.0.0
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
-# Install full Chromium (not --only-shell) plus its system deps
+# Install full Chromium (not --only-shell) plus its system deps.
 RUN npx playwright install --with-deps chromium
 
 # Persistent virtual display + remote viewing: xauth (X auth cookies),
 # x11vnc (exposes the display over VNC), websockify+novnc (VNC-over-HTTP
-# so it's viewable in a plain browser tab, no VNC client needed)
+# so it is viewable in a plain browser tab, no VNC client needed).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    xauth x11vnc novnc websockify \
+    xauth x11vnc novnc websockify xvfb dbus-x11 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY . .
@@ -25,6 +29,5 @@ RUN npm run build
 
 # 8080 = app, 6080 = noVNC web viewer (watch/control the login browser)
 EXPOSE 8080 6080
-ENV PORT=8080
 
 CMD ["/entrypoint.sh"]

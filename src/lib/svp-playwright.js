@@ -31,6 +31,22 @@ const STORAGE_FILE = join(process.cwd(), '.svp-storage.json');
 // so launch via the signed Microsoft Edge instead. Other platforms (e.g. a Linux
 // VPS) keep using Playwright's bundled Chromium, which works fine there.
 const BROWSER_LAUNCH_OPTS = process.platform === 'win32' ? { channel: 'msedge' } : {};
+const isManagedRuntime = !!(
+  process.env.VERCEL ||
+  process.env.RAILWAY_ENVIRONMENT_NAME ||
+  process.env.RAILWAY_STATIC_URL ||
+  process.env.NETLIFY ||
+  process.env.CF_PAGES ||
+  process.env.CI
+);
+const hasBrowserDisplay = !!process.env.DISPLAY;
+
+function assertInteractiveLoginSupported() {
+  if (process.platform === 'win32') return;
+  if (isManagedRuntime && !hasBrowserDisplay) {
+    throw new Error('Interactive SVP login is not supported on this deployment host. Use a long-running server with a browser display or run the app locally.');
+  }
+}
 
 let managedBrowser = null;
 let managedContext = null;
@@ -183,16 +199,174 @@ async function closeManagedBrowser() {
   }
 }
 
-// ─── Login (Browser-visible, manual OTP) ────────────────────────
+// ─── Login (Browser-based; automated when credentials are set) ──
 
-export function login() {
+export function login(options = {}) {
   if (checkLoggedIn()) {
     return { success: true, message: 'Already logged in.' };
   }
-  return doLogin();
+  return doLogin(options);
 }
 
-async function doLogin() {
+// Resolve a credential from the request body first, then env vars.
+function resolveCredential(value, envKey) {
+  if (value && String(value).trim()) return String(value).trim();
+  const env = process.env[envKey];
+  return env ? String(env).trim() : '';
+}
+
+// Poll until a selector matches a visible element (or timeout).
+async function waitForVisible(page, selector, { timeoutMs = 20000, intervalMs = 1000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const el = page.locator(selector).first();
+    try {
+      if (await el.isVisible()) return el;
+    } catch {}
+    await page.waitForTimeout(intervalMs);
+  }
+  return null;
+}
+
+// Fill the first visible field matching `selector`; no-op when empty/hidden.
+async function fillIfVisible(page, selector, value, { timeoutMs = 15000 } = {}) {
+  if (!value) return false;
+  const el = await waitForVisible(page, selector, { timeoutMs });
+  if (!el) return false;
+  try {
+    await el.click();
+    await el.fill(value);
+    return true;
+  } catch {
+    try {
+      await el.pressSequentially(value, { delay: 25 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+// Click the first visible/enabled button whose text contains one of `texts`.
+async function clickButtonByText(page, texts, { timeoutMs = 15000, intervalMs = 1000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const t of texts) {
+      const btn = page.locator(`button:has-text("${t}"), [role="button"]:has-text("${t}")`).first();
+      try {
+        if ((await btn.isVisible()) && (await btn.isEnabled())) {
+          await btn.click();
+          return t;
+        }
+      } catch {}
+    }
+    await page.waitForTimeout(intervalMs);
+  }
+  return null;
+}
+
+const OTP_FIELD_SELECTORS = [
+  'input[autocomplete="one-time-code"]',
+  'input[inputmode="numeric"]',
+  'input[placeholder*="code" i]',
+  'input[placeholder*="otp" i]',
+  'input[placeholder*="verification" i]'
+].join(', ');
+
+const RECAPTCHA_SELECTORS = [
+  'iframe[src*="recaptcha"]',
+  '.g-recaptcha',
+  '#g-recaptcha-response',
+  '[class*="recaptcha"]'
+].join(', ');
+
+// Best-effort injection of a pre-solved reCAPTCHA token (e.g. from a solver
+// service). If injection fails, the token-capture loop below still works as a
+// manual-VNC fallback.
+async function injectRecaptchaToken(page, token) {
+  if (!token) return false;
+  return page.evaluate((t) => {
+    const textarea = document.getElementById('g-recaptcha-response');
+    if (textarea) textarea.value = t;
+    const widget = document.querySelector('.g-recaptcha');
+    if (widget) {
+      const cb = widget.getAttribute('data-callback');
+      if (cb && typeof window[cb] === 'function') {
+        window[cb](t);
+        return true;
+      }
+    }
+    return false;
+  }, token).catch(() => false);
+}
+
+// Drive the SVP login form automatically. Returns true once the form has
+// been submitted; the caller keeps polling for the captured auth token.
+async function autoFillLoginCredentials(page, { email, password, otp, recaptchaToken }) {
+  if (!email) return false;
+
+  // Some flows ask for a phone number instead of an email.
+  const emailSel = 'input[type="email"], input[placeholder*="email" i], input[name="email"]';
+  const phoneSel = 'input[type="tel"], input[placeholder*="phone" i], input[name="phone_number"]';
+
+  let accountField = await waitForVisible(page, `${emailSel}, ${phoneSel}`, { timeoutMs: 30000 });
+  if (!accountField) {
+    // Landing page: open the Sign In dropdown first.
+    const opened = await clickButtonByText(page, ['Sign in', 'Sign In', 'Login'], { timeoutMs: 8000 });
+    if (opened) {
+      accountField = await waitForVisible(page, `${emailSel}, ${phoneSel}`, { timeoutMs: 20000 });
+    }
+  }
+  if (!accountField) return false;
+
+  const usePhone = await page.locator(phoneSel).first().isVisible().catch(() => false);
+  const filledAccount = usePhone
+    ? await fillIfVisible(page, phoneSel, email, { timeoutMs: 10000 })
+    : await fillIfVisible(page, emailSel, email, { timeoutMs: 10000 });
+  if (!filledAccount) return false;
+
+  await clickButtonByText(page, ['Continue', 'Sign in', 'Sign In', 'Next'], { timeoutMs: 10000 });
+
+  // Password step.
+  if (password) {
+    const filledPassword = await fillIfVisible(page, 'input[type="password"]', password, { timeoutMs: 15000 });
+    if (filledPassword) {
+      await clickButtonByText(page, ['Sign in', 'Sign In', 'Login', 'Continue', 'Verify'], { timeoutMs: 10000 });
+    }
+  }
+
+  // reCAPTCHA step (may already be skipped server-side via skip_recaptcha_step).
+  if (recaptchaToken) {
+    const recaptchaVisible = await waitForVisible(page, RECAPTCHA_SELECTORS, { timeoutMs: 8000 });
+    if (recaptchaVisible) {
+      const injected = await injectRecaptchaToken(page, recaptchaToken);
+      if (injected) {
+        await clickButtonByText(page, ['Continue', 'Sign in', 'Verify'], { timeoutMs: 5000 });
+      }
+    }
+  }
+
+  // OTP / verification-code step (auto-filled when a code was supplied).
+  if (otp) {
+    const codeField = await waitForVisible(page, OTP_FIELD_SELECTORS, { timeoutMs: 8000 });
+    if (codeField) {
+      const filledCode = await fillIfVisible(page, OTP_FIELD_SELECTORS, otp, { timeoutMs: 5000 });
+      if (filledCode) {
+        await clickButtonByText(page, ['Verify', 'Continue', 'Sign in', 'Login'], { timeoutMs: 5000 });
+      }
+    }
+  }
+
+  return true;
+}
+
+async function doLogin(options = {}) {
+  const email = resolveCredential(options.email, 'SVP_EMAIL');
+  const password = resolveCredential(options.password, 'SVP_PASSWORD');
+  const otp = resolveCredential(options.otp, 'SVP_OTP');
+  const recaptchaToken = resolveCredential(options.recaptchaToken, 'SVP_RECAPTCHA_TOKEN');
+  const hasAutoCreds = !!(email || password || otp || recaptchaToken);
+
   let browser = null;
   try {
     browser = await chromium.launch({
@@ -245,7 +419,21 @@ async function doLogin() {
       document.title = 'Exam Center Manager';
     });
 
-    console.log('[Login] Waiting for manual login (timeout: 5 minutes)...');
+    // Automated credential entry (best-effort; manual VNC remains the fallback).
+    let autoSubmitted = false;
+    if (hasAutoCreds) {
+      console.log(`[Login] Automated credentials configured (email=${email ? 'set' : 'none'}, otp=${otp ? 'set' : 'none'}).`);
+      try {
+        autoSubmitted = await autoFillLoginCredentials(page, { email, password, otp, recaptchaToken });
+      } catch (err) {
+        console.warn('[Login] Automated fill error (continuing with manual fallback):', err.message);
+      }
+      console.log(autoSubmitted
+        ? '[Login] Automated form entry submitted; waiting for auth token...'
+        : '[Login] Could not auto-fill the form; leaving the browser open for manual login.');
+    } else {
+      console.log('[Login] No automated credentials; waiting for manual login (timeout: 5 minutes)...');
+    }
 
     const loginStart = Date.now();
     const timeout = 5 * 60 * 1000;
@@ -307,7 +495,12 @@ async function doLogin() {
     }
 
     await browser.close();
-    return { success: false, error: 'Login timed out after 5 minutes.' };
+    return {
+      success: false,
+      error: hasAutoCreds
+        ? 'Login timed out after 5 minutes. SVP likely required a CAPTCHA or an OTP code that was not supplied (or the form could not be filled). Complete it manually in the VNC viewer, or retry with otp/recaptchaToken.'
+        : 'Login timed out after 5 minutes. No credentials were provided (set SVP_EMAIL/SVP_PASSWORD or pass email/password in the request body), so manual login in the VNC viewer was expected.'
+    };
 
   } catch (error) {
     console.error('[Login] Fatal error:', error.message);

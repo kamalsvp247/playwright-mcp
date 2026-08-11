@@ -84,7 +84,42 @@ curl -X POST https://<your-host>/api/auth/login \
   -d '{"email":"user@example.com","password":"secret","otp":"123456","recaptchaToken":"..."}'
 ```
 
-With no body, the endpoint falls back to `SVP_EMAIL`/`SVP_PASSWORD` (etc.) from the environment. The request still blocks for up to **5 minutes** while the browser completes the flow, so always call it with a client timeout ≥ 320s (e.g. `Invoke-WebRequest -TimeoutSec 320`).
+With no body, the endpoint falls back to `SVP_EMAIL`/`SVP_PASSWORD` (etc.) from the environment.
+
+The endpoint is **non-blocking**: it starts the browser login in the background and returns immediately — `HTTP 202` with `{ "success": true, "status": "started" }` (or `200` with `"Already logged in."` if a token is already cached). No client-side timeout is ever needed, so you will never hit an HTTP `499` from a long-held request again. Poll `GET /api/auth/status` to follow progress — `data.login.status` moves through `running` → `success` / `error` / `timeout`, and `data.loggedIn` flips to `true` the moment the Bearer token is captured.
+
+```bash
+# 1. Kick off login — returns in < 1s
+curl -s -X POST https://<your-host>/api/auth/login
+# → {"success":true,"status":"started",...}
+
+# 2. Poll until it finishes (here: every 4s)
+while true; do
+  curl -s https://<your-host>/api/auth/status
+  echo
+  sleep 4
+done
+```
+
+PowerShell (use a Chrome UA so SVP does not flag the request; no `-TimeoutSec` needed):
+
+```powershell
+$session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$session.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+
+$r = Invoke-RestMethod -Uri "https://<your-host>/api/auth/login" -Method Post -WebSession $session
+$r | ConvertTo-Json   # {"success":true,"status":"started",...}
+
+do {
+  Start-Sleep -Seconds 4
+  $s = Invoke-RestMethod -Uri "https://<your-host>/api/auth/status" -WebSession $session
+  $st = $s.data.login.status
+} until ($s.data.loggedIn -or $st -in @("success","error","timeout"))
+
+if ($s.data.loggedIn -or $st -eq "success") { "LOGIN OK" } else { $s.data.login.message }
+```
+
+> The kick-off + poll design assumes a long-running server host (the Railway Docker runtime) so the background Playwright flow keeps running after the request returns.
 
 What the automation does internally:
 

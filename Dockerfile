@@ -9,7 +9,10 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0
 
 COPY package*.json ./
-RUN npm ci
+# NODE_ENV=production is already set above, so npm would omit devDependencies
+# (including @tailwindcss/postcss, needed by the Next.js/Turbopack build).
+# --include=dev installs everything so `npm run build` succeeds.
+RUN npm ci --include=dev
 
 # Install full Chromium (not --only-shell) plus its system deps.
 RUN npx playwright install --with-deps chromium

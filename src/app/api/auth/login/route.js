@@ -3,7 +3,15 @@ import { getDb, verifyPassword, createSession, getSessionUser, logAudit } from '
 
 export async function POST(request) {
   try {
-    const body = await request.json();
+    const contentType = request.headers.get('content-type') || '';
+    let body;
+    if (contentType.includes('application/json')) {
+      body = await request.json();
+    } else {
+      // Fall back to form-encoded (e.g. x-www-form-urlencoded) bodies.
+      const form = await request.formData();
+      body = Object.fromEntries(form.entries());
+    }
     const { username, password } = body;
     
     if (!username || !password) {

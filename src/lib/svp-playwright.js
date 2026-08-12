@@ -449,6 +449,12 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
     const url = await page.evaluate(() => document.location.href);
     const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
     console.log('[Login] After account step. URL:', url, 'Text:', text);
+    
+    // Check if we're still on the same page (form didn't submit)
+    const stillOnLogin = url.includes('/auth/login') && text.includes('Email') && text.includes('Password');
+    if (stillOnLogin && !text.includes('verification') && !text.includes('code')) {
+      console.log('[Login] Account step did not progress to next step');
+    }
   } catch (e) {
     console.log('[Login] After account step. Eval error:', e.message);
   }
@@ -462,6 +468,19 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
         const url = await page.evaluate(() => document.location.href);
         const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
         console.log('[Login] After password step. URL:', url, 'Text:', text);
+        
+        // Check if we're still on the login page with an error
+        const isError = text.toLowerCase().includes('error') || 
+                        text.toLowerCase().includes('invalid') ||
+                        text.toLowerCase().includes('incorrect') ||
+                        text.toLowerCase().includes('wrong');
+        const stillOnLogin = url.includes('/auth/login') && 
+                            (text.includes('Email') && text.includes('Password'));
+        
+        if (isError && stillOnLogin) {
+          console.log('[Login] Password step failed - credentials rejected');
+          return false;
+        }
       } catch (e) {
         console.log('[Login] After password step. Eval error:', e.message);
       }

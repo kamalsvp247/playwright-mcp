@@ -447,7 +447,8 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
   await clickButtonByText(page, ['Continue', 'Sign in', 'Sign In', 'Next'], { timeoutMs: 10000 });
   try {
     const url = await page.evaluate(() => document.location.href);
-    console.log('[Login] After account step. URL:', url);
+    const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
+    console.log('[Login] After account step. URL:', url, 'Text:', text);
   } catch (e) {
     console.log('[Login] After account step. Eval error:', e.message);
   }
@@ -459,7 +460,8 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
       await clickButtonByText(page, ['Sign in', 'Sign In', 'Login', 'Continue', 'Verify'], { timeoutMs: 10000 });
       try {
         const url = await page.evaluate(() => document.location.href);
-        console.log('[Login] After password step. URL:', url);
+        const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
+        console.log('[Login] After password step. URL:', url, 'Text:', text);
       } catch (e) {
         console.log('[Login] After password step. Eval error:', e.message);
       }
@@ -486,9 +488,12 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
 
   // OTP / verification-code step (auto-filled when a code was supplied).
   if (otp) {
+    console.log('[Login] Looking for OTP field with selectors:', OTP_FIELD_SELECTORS);
     const codeField = await waitForVisible(page, OTP_FIELD_SELECTORS, { timeoutMs: 8000 });
     if (codeField) {
+      console.log('[Login] OTP field found. Filling...');
       const filledCode = await fillIfVisible(page, OTP_FIELD_SELECTORS, otp, { timeoutMs: 5000 });
+      console.log('[Login] OTP filled:', filledCode);
       if (filledCode) {
         await clickButtonByText(page, ['Verify', 'Continue', 'Sign in', 'Login'], { timeoutMs: 5000 });
       }

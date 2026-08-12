@@ -426,14 +426,15 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
   }
   if (!accountField) return false;
 
-  let usePhone = false;
-  try {
-    usePhone = await page.locator(phoneSel).first().isVisible();
-  } catch {}
+  let filledAccount = false;
+  let filledPassword = false;
 
-  const filledAccount = usePhone
-    ? await fillIfVisible(page, phoneSel, email, { timeoutMs: 10000 })
-    : await fillIfVisible(page, emailSel, email, { timeoutMs: 10000 });
+  const usePhone = await page.locator(phoneSel).first().isVisible().catch(() => false);
+  if (usePhone) {
+    filledAccount = await fillIfVisible(page, phoneSel, email, { timeoutMs: 10000 });
+  } else {
+    filledAccount = await fillIfVisible(page, emailSel, email, { timeoutMs: 10000 });
+  }
   if (!filledAccount) {
     try {
       const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
@@ -444,47 +445,9 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
     return false;
   }
 
-  await clickButtonByText(page, ['Continue', 'Sign in', 'Sign In', 'Next'], { timeoutMs: 10000 });
-  try {
-    const url = await page.evaluate(() => document.location.href);
-    const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
-    console.log('[Login] After account step. URL:', url, 'Text:', text);
-    
-    // Check if we're still on the same page (form didn't submit)
-    const stillOnLogin = url.includes('/auth/login') && text.includes('Email') && text.includes('Password');
-    if (stillOnLogin && !text.includes('verification') && !text.includes('code')) {
-      console.log('[Login] Account step did not progress to next step');
-    }
-  } catch (e) {
-    console.log('[Login] After account step. Eval error:', e.message);
-  }
-
-  // Password step.
   if (password) {
-    const filledPassword = await fillIfVisible(page, 'input[type="password"]', password, { timeoutMs: 15000 });
-    if (filledPassword) {
-      await clickButtonByText(page, ['Sign in', 'Sign In', 'Login', 'Continue', 'Verify'], { timeoutMs: 10000 });
-      try {
-        const url = await page.evaluate(() => document.location.href);
-        const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
-        console.log('[Login] After password step. URL:', url, 'Text:', text);
-        
-        // Check if we're still on the login page with an error
-        const isError = text.toLowerCase().includes('error') || 
-                        text.toLowerCase().includes('invalid') ||
-                        text.toLowerCase().includes('incorrect') ||
-                        text.toLowerCase().includes('wrong');
-        const stillOnLogin = url.includes('/auth/login') && 
-                            (text.includes('Email') && text.includes('Password'));
-        
-        if (isError && stillOnLogin) {
-          console.log('[Login] Password step failed - credentials rejected');
-          return false;
-        }
-      } catch (e) {
-        console.log('[Login] After password step. Eval error:', e.message);
-      }
-    } else {
+    filledPassword = await fillIfVisible(page, 'input[type="password"]', password, { timeoutMs: 15000 });
+    if (!filledPassword) {
       try {
         const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
         console.log('[Login] Could not fill password field. Page text:', text);
@@ -492,6 +455,10 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
         console.log('[Login] Could not fill password field. Eval error:', e.message);
       }
     }
+  }
+
+  if (filledAccount || filledPassword) {
+    await clickButtonByText(page, ['Sign in', 'Sign In', 'Login', 'Continue', 'Verify'], { timeoutMs: 10000 });
   }
 
   // reCAPTCHA step (may already be skipped server-side via skip_recaptcha_step).

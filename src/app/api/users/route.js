@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getDb, hashPassword, verifyPassword, createSession, logAudit } from '@/lib/db';
+import { getDb, hashPassword, logAudit } from '@/lib/db';
 
 export async function POST(request) {
   try {
@@ -17,25 +17,25 @@ export async function POST(request) {
     const allowedRoles = ['admin', 'staff'];
     const userRole = allowedRoles.includes(role) ? role : 'staff';
     
-    const db = getDb();
     const passwordHash = hashPassword(password);
     
-    try {
-      const result = db.prepare(
-        'INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, ?, ?)'
-      ).run(username, passwordHash, userRole, 'active');
-      
-      const user = db.prepare('SELECT id, username, role, status, created_at FROM users WHERE id = ?').get(result.lastInsertRowid);
-      
-      logAudit(request.user?.id, 'user_created', { targetUserId: user.id, username: user.username });
-      
-      return NextResponse.json({ success: true, data: user });
-    } catch (e) {
-      if (e.message.includes('UNIQUE constraint failed')) {
+    const { data: user, error } = await getDb()
+      .from('app_users')
+      .insert({ username, password_hash: passwordHash, role: userRole, status: 'active' })
+      .select('id, username, role, status, created_at')
+      .single();
+    
+    if (error) {
+      if (error.code === '23505' || (error.message || '').includes('unique') || (error.message || '').includes('duplicate')) {
         return NextResponse.json({ success: false, error: 'Username already exists' }, { status: 409 });
       }
-      throw e;
+      console.error('Create user error:', error.message);
+      return NextResponse.json({ success: false, error: 'Failed to create user' }, { status: 500 });
     }
+    
+    logAudit(request.user?.id, 'user_created', { targetUserId: user.id, username: user.username });
+    
+    return NextResponse.json({ success: true, data: user });
   } catch (e) {
     console.error('Create user error:', e);
     return NextResponse.json({ success: false, error: 'Failed to create user' }, { status: 500 });

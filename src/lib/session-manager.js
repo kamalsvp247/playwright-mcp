@@ -1,5 +1,17 @@
 import { getDb, deleteUserSessions } from './db.js';
 
+function safeParse(json) {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+// ── app_svp_sessions persistence (Postgres via Supabase) ──
+// Mirrors the old local-sqlite helpers but targets the live project's
+// app_svp_sessions table.
+
 const SVP_LOGIN_URL = 'https://svp-international.pacc.sa/auth/login?role=labor';
 const SVP_BASE = 'https://svp-international.pacc.sa';
 
@@ -43,12 +55,15 @@ class SessionManager {
 
   async loadSessionFromDb(userSession) {
     try {
-      const db = getDb();
-      const row = db.prepare('SELECT token, token_expiry, storage_json FROM svp_sessions WHERE user_id = ?').get(userSession.userId);
+      const { data: row } = await getDb()
+        .from('app_svp_sessions')
+        .select('token, token_expiry, storage_json')
+        .eq('user_id', userSession.userId)
+        .maybeSingle();
       if (row) {
         userSession.token = row.token;
         userSession.tokenExpiry = row.token_expiry ? new Date(row.token_expiry) : null;
-        userSession.storageState = row.storage_json ? JSON.parse(row.storage_json) : null;
+        userSession.storageState = row.storage_json ? safeParse(row.storage_json) : null;
         
         if (userSession.tokenExpiry && new Date() >= userSession.tokenExpiry) {
           userSession.token = null;
@@ -63,21 +78,16 @@ class SessionManager {
 
   async saveSessionToDb(userSession) {
     try {
-      const db = getDb();
-      db.prepare(`
-        INSERT INTO svp_sessions (user_id, token, token_expiry, storage_json, updated_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(user_id) DO UPDATE SET
-          token = excluded.token,
-          token_expiry = excluded.token_expiry,
-          storage_json = excluded.storage_json,
-          updated_at = excluded.updated_at
-      `).run(
-        userSession.userId,
-        userSession.token,
-        userSession.tokenExpiry ? userSession.tokenExpiry.toISOString() : null,
-        userSession.storageState ? JSON.stringify(userSession.storageState) : null
-      );
+      const { error } = await getDb()
+        .from('app_svp_sessions')
+        .upsert({
+          user_id: userSession.userId,
+          token: userSession.token,
+          token_expiry: userSession.tokenExpiry ? userSession.tokenExpiry.toISOString() : null,
+          storage_json: userSession.storageState ? JSON.stringify(userSession.storageState) : null,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+      if (error) throw error;
     } catch (e) {
       console.error(`[SessionManager] Failed to save session for user ${userSession.userId}:`, e.message);
     }
@@ -93,9 +103,8 @@ class SessionManager {
     }
     
     try {
-      const db = getDb();
-      db.prepare('DELETE FROM svp_sessions WHERE user_id = ?').run(userId);
-      deleteUserSessions(userId);
+      await getDb().from('app_svp_sessions').delete().eq('user_id', userId);
+      await deleteUserSessions(userId);
     } catch (e) {
       console.error(`[SessionManager] Failed to clear session for user ${userId}:`, e.message);
     }

@@ -1,123 +1,123 @@
-import Database from 'better-sqlite3';
-import { join } from 'path';
+// ─────────────────────────────────────────────────────────────
+// Supabase-backed data layer (replaces the local better-sqlite3 file DB).
+//
+// All app state now lives in the live Supabase Postgres project so it
+// persists across serverless invocations. The exported function names are
+// intentionally kept identical to the old sqlite API so existing call sites
+// (auth routes, session-manager, middleware) keep working unchanged.
+// ─────────────────────────────────────────────────────────────
 
-const DB_PATH = join(process.cwd(), 'data', 'app.db');
+import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
 
-let db = null;
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
 
+let _client = null;
+
+// Returns a shared Supabase client using the service-role key (bypasses RLS).
 export function getDb() {
-  if (!db) {
-    const fs = require('fs');
-    const dir = join(process.cwd(), 'data');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'staff',
-        status TEXT NOT NULL DEFAULT 'active',
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  if (!_client) {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      throw new Error(
+        'Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY ' +
+          '(see .env.example).'
       );
-      
-      CREATE TABLE IF NOT EXISTS sessions (
-        id TEXT PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        expires_at TEXT NOT NULL
-      );
-      
-      CREATE TABLE IF NOT EXISTS svp_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        token TEXT,
-        token_expiry TEXT,
-        storage_json TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-        UNIQUE(user_id)
-      );
-      
-      CREATE TABLE IF NOT EXISTS audit_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-        action TEXT NOT NULL,
-        details TEXT,
-        ip TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-      CREATE INDEX IF NOT EXISTS idx_svp_sessions_user_id ON svp_sessions(user_id);
-      CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
-    `);
+    }
+    _client = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
   }
-  return db;
+  return _client;
 }
 
+// ── password hashing (kept identical to the old sqlite implementation) ──
+
 export function hashPassword(password) {
-  const crypto = require('crypto');
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
   return `sha512$${salt}$${hash}`;
 }
 
 export function verifyPassword(password, hash) {
-  const crypto = require('crypto');
   const [, salt, storedHash] = hash.split('$');
+  if (!salt || !storedHash) return false;
   const testHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
   return storedHash === testHash;
 }
 
-export function createSession(db, userId, maxAge = 30 * 24 * 60 * 60 * 1000) {
-  const sessionId = require('crypto').randomBytes(32).toString('hex');
+// ── sessions (the `db` argument is accepted for API compatibility only) ──
+
+export async function createSession(db, userId, maxAge = 30 * 24 * 60 * 60 * 1000) {
+  const sessionId = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + maxAge).toISOString();
-  db.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)').run(sessionId, userId, expiresAt);
+  const { error } = await getDb()
+    .from('app_sessions')
+    .insert({ id: sessionId, user_id: userId, expires_at: expiresAt });
+  if (error) throw error;
   return sessionId;
 }
 
-export function getSessionUser(db, sessionId) {
+export async function getSessionUser(db, sessionId) {
   if (!sessionId) return null;
-  const session = db.prepare(`
-    SELECT u.id, u.username, u.role, u.status 
-    FROM sessions s 
-    JOIN users u ON s.user_id = u.id 
-    WHERE s.id = ? AND s.expires_at > datetime('now') AND u.status = 'active'
-  `).get(sessionId);
-  return session || null;
+  const { data, error } = await getDb()
+    .from('app_sessions')
+    .select('user_id, expires_at')
+    .eq('id', sessionId)
+    .gt('expires_at', new Date().toISOString())
+    .maybeSingle();
+  if (error || !data) return null;
+
+  const { data: user, error: userErr } = await getDb()
+    .from('app_users')
+    .select('id, username, role, status')
+    .eq('id', data.user_id)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (userErr || !user) return null;
+  return user;
 }
 
-export function deleteSession(sessionId) {
+export async function deleteSession(sessionId) {
   if (!sessionId) return;
   try {
-    getDb().prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+    await getDb().from('app_sessions').delete().eq('id', sessionId);
   } catch {}
 }
 
-export function deleteUserSessions(userId) {
+export async function deleteUserSessions(userId) {
   try {
-    getDb().prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
+    await getDb().from('app_sessions').delete().eq('user_id', userId);
   } catch {}
 }
 
 export function logAudit(userId, action, details = null, ip = null) {
   try {
-    getDb().prepare('INSERT INTO audit_log (user_id, action, details, ip) VALUES (?, ?, ?, ?)').run(userId, action, details, ip);
+    getDb()
+      .from('app_audit_log')
+      .insert({ user_id: userId ?? null, action, details, ip })
+      .then(() => {}, () => {});
   } catch {}
 }
 
-export function initializeAdmin() {
-  const db = getDb();
-  const count = db.prepare('SELECT COUNT(*) as cnt FROM users').get().cnt;
-  if (count === 0) {
-    const passwordHash = hashPassword('admin@12333');
-    db.prepare("INSERT INTO users (username, password_hash, role, status) VALUES (?, ?, 'admin', 'active')").run('admin@gmail.com', passwordHash);
-    console.log('[DB] Initialized admin user: admin@gmail.com');
+// ── one-time admin bootstrap ──
+
+export async function initializeAdmin() {
+  const { data: existing } = await getDb()
+    .from('app_users')
+    .select('id')
+    .limit(1);
+  if (existing && existing.length > 0) return;
+
+  const passwordHash = hashPassword('admin@12333');
+  const { error } = await getDb()
+    .from('app_users')
+    .insert({ username: 'admin@gmail.com', password_hash: passwordHash, role: 'admin', status: 'active' });
+  if (error) {
+    console.error('[DB] Failed to initialize admin user:', error.message);
+    return;
   }
+  console.log('[DB] Initialized admin user: admin@gmail.com');
 }
+

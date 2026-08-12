@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request) {
   try {
     const sessionId = request.cookies.get('session')?.value;
-    const user = sessionId ? getSessionUser(getDb(), sessionId) : null;
+    const user = sessionId ? await getSessionUser(getDb(), sessionId) : null;
     
     const loggedIn = isLoggedIn();
     const token = getToken();

@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server';
-import { getDb, verifyPassword, hashPassword, logAudit } from '@/lib/db';
+import { getDb, hashPassword, logAudit } from '@/lib/db';
 import { sessionManager } from '@/lib/session-manager';
 
 export async function GET(request, { params }) {
   try {
     const { id } = params;
-    const db = getDb();
-    const user = db.prepare('SELECT id, username, role, status, created_at FROM users WHERE id = ?').get(id);
+    const { data: user, error } = await getDb()
+      .from('app_users')
+      .select('id, username, role, status, created_at')
+      .eq('id', id)
+      .maybeSingle();
     
-    if (!user) {
+    if (error || !user) {
       return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
     }
     
@@ -25,41 +28,36 @@ export async function PATCH(request, { params }) {
     const body = await request.json();
     const { username, password, role, status } = body;
     
-    const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+    const { data: user, error: lookupErr } = await getDb()
+      .from('app_users')
+      .select('id, username')
+      .eq('id', id)
+      .maybeSingle();
     
-    if (!user) {
+    if (lookupErr || !user) {
       return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
     }
     
-    const updates = [];
-    const values = [];
+    const updates = {};
     
     if (username && username !== user.username) {
-      updates.push('username = ?');
-      values.push(username);
+      updates.username = username;
     }
-    
     if (password) {
-      updates.push('password_hash = ?');
-      values.push(hashPassword(password));
+      updates.password_hash = hashPassword(password);
     }
-    
     if (role && ['admin', 'staff'].includes(role)) {
-      updates.push('role = ?');
-      values.push(role);
+      updates.role = role;
     }
-    
     if (status && ['active', 'inactive'].includes(status)) {
-      updates.push('status = ?');
-      values.push(status);
+      updates.status = status;
     }
     
-    if (updates.length > 0) {
-      updates.push("updated_at = datetime('now')");
-      values.push(id);
+    if (Object.keys(updates).length > 0) {
+      updates.updated_at = new Date().toISOString();
       
-      db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+      const { error } = await getDb().from('app_users').update(updates).eq('id', id);
+      if (error) throw error;
       
       if (status === 'inactive') {
         await sessionManager.invalidateUser(parseInt(id));
@@ -68,7 +66,11 @@ export async function PATCH(request, { params }) {
       logAudit(request.user?.id, 'user_updated', { targetUserId: id, changes: body });
     }
     
-    const updated = db.prepare('SELECT id, username, role, status, created_at FROM users WHERE id = ?').get(id);
+    const { data: updated } = await getDb()
+      .from('app_users')
+      .select('id, username, role, status, created_at')
+      .eq('id', id)
+      .maybeSingle();
     return NextResponse.json({ success: true, data: updated });
   } catch (e) {
     console.error('Update user error:', e);
@@ -79,17 +81,22 @@ export async function PATCH(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     const { id } = params;
-    const db = getDb();
+    const numericId = parseInt(id);
     
-    const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id);
-    if (!user) {
+    const { data: user, error: lookupErr } = await getDb()
+      .from('app_users')
+      .select('id, username')
+      .eq('id', numericId)
+      .maybeSingle();
+    if (lookupErr || !user) {
       return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
     }
     
-    await sessionManager.invalidateUser(parseInt(id));
-    db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    await sessionManager.invalidateUser(numericId);
+    const { error } = await getDb().from('app_users').delete().eq('id', numericId);
+    if (error) throw error;
     
-    logAudit(request.user?.id, 'user_deleted', { targetUserId: id, username: user.username });
+    logAudit(request.user?.id, 'user_deleted', { targetUserId: numericId, username: user.username });
     
     return NextResponse.json({ success: true });
   } catch (e) {

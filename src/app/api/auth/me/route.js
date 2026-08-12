@@ -4,7 +4,7 @@ import { getDb, getSessionUser } from '@/lib/db';
 export async function GET(request) {
   try {
     const sessionId = request.cookies.get('session')?.value;
-    const user = sessionId ? getSessionUser(getDb(), sessionId) : null;
+    const user = sessionId ? await getSessionUser(getDb(), sessionId) : null;
     
     if (!user) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

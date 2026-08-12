@@ -10,15 +10,24 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Username and password are required' }, { status: 400 });
     }
     
-    const db = getDb();
-    const user = db.prepare('SELECT * FROM users WHERE username = ? AND status = ?').get(username, 'active');
+    const { data: user, error } = await getDb()
+      .from('app_users')
+      .select('*')
+      .eq('username', username)
+      .eq('status', 'active')
+      .maybeSingle();
+    
+    if (error) {
+      console.error('Login lookup error:', error.message);
+      return NextResponse.json({ success: false, error: 'Login failed' }, { status: 500 });
+    }
     
     if (!user || !verifyPassword(password, user.password_hash)) {
       logAudit(null, 'login_failed', { username }, request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip'));
       return NextResponse.json({ success: false, error: 'Invalid username or password' }, { status: 401 });
     }
     
-    const sessionId = createSession(db, user.id);
+    const sessionId = await createSession(getDb(), user.id);
     logAudit(user.id, 'login_success');
     
     const response = NextResponse.json({
@@ -49,7 +58,7 @@ export async function POST(request) {
 export async function DELETE(request) {
   try {
     const sessionId = request.cookies.get('session')?.value;
-    const user = sessionId ? getSessionUser(getDb(), sessionId) : null;
+    const user = sessionId ? await getSessionUser(getDb(), sessionId) : null;
     
     if (user) {
       logAudit(user.id, 'logout');

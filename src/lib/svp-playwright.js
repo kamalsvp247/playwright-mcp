@@ -11,12 +11,33 @@
  *   - Dynamic wizard step detection
  */
 
-import { chromium } from 'playwright';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { getToken as getAuthToken, isLoggedIn as checkLoggedIn, logout as doLogout } from './svp-auth.js';
 
 export { checkLoggedIn as isLoggedIn, doLogout as logout, getAuthToken as getToken };
+
+let _chromium = null;
+let _playwrightError = null;
+
+async function ensurePlaywright() {
+  if (_chromium) return _chromium;
+  if (_playwrightError) throw _playwrightError;
+  try {
+    const mod = await import('playwright');
+    _chromium = mod.chromium;
+    return _chromium;
+  } catch (err) {
+    const msg = err.message || '';
+    const isBrowserMissing = msg.includes('browsers.json') || msg.includes('Cannot find module') || msg.includes(' browser ');
+    _playwrightError = new Error(
+      isBrowserMissing
+        ? 'Browser automation is not available on this host (Vercel serverless). Deploy the Docker build on a container host, or use a separate login worker.'
+        : `Playwright failed to load: ${msg}`
+    );
+    throw _playwrightError;
+  }
+}
 
 const SVP_BASE = 'https://svp-international.pacc.sa';
 const SVP_LOGIN_URL = `${SVP_BASE}/auth/login?role=labor`;
@@ -82,7 +103,7 @@ async function ensureManagedBrowser() {
   const token = getAuthToken();
   if (!token) throw new Error('Not authenticated');
 
-  managedBrowser = await chromium.launch({
+  managedBrowser = await (await ensurePlaywright()).launch({
     ...BROWSER_LAUNCH_OPTS,
     headless: true,
     args: [
@@ -453,7 +474,7 @@ async function doLogin(options = {}) {
 
   let browser = null;
   try {
-    browser = await chromium.launch({
+    browser = await (await ensurePlaywright()).launch({
       ...BROWSER_LAUNCH_OPTS,
       headless: false,
       args: [

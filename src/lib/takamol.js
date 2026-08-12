@@ -1,4 +1,4 @@
-import { getToken, authenticatedFetch } from './svp-playwright.js';
+import { sessionManager } from './session-manager.js';
 
 const API_BASE = 'https://svp-international-api.pacc.sa/api/v1';
 const BANGLADESH_ID = 78;
@@ -16,6 +16,22 @@ function getCached(key) {
 
 function setCache(key, data, ttl) {
   cache.set(key, { data, time: Date.now(), ttl });
+}
+
+async function getAuthHeaders(userId) {
+  if (!userId) throw new Error('User ID required');
+  
+  const userSession = await sessionManager.getOrCreateUserSession(userId);
+  
+  if (!userSession.token || userSession.isExpired()) {
+    throw new Error('Not authenticated. Please connect your SVP account first.');
+  }
+  
+  return {
+    'Authorization': `Bearer ${userSession.token}`,
+    'Accept': 'application/json',
+    'Content-Type': 'application/json'
+  };
 }
 
 export async function fetchCategories() {  const cacheKey = 'categories';

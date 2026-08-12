@@ -33,4 +33,4 @@ RUN npm run build
 # 8080 = app, 6080 = noVNC web viewer (watch/control the login browser)
 EXPOSE 8080 6080
 
-CMD ["/entrypoint.sh"]
+CMD ["sh", "/entrypoint.sh"]

@@ -426,26 +426,50 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
   }
   if (!accountField) return false;
 
-  const usePhone = await page.locator(phoneSel).first().isVisible().catch(() => false);
+  let usePhone = false;
+  try {
+    usePhone = await page.locator(phoneSel).first().isVisible();
+  } catch {}
+
   const filledAccount = usePhone
     ? await fillIfVisible(page, phoneSel, email, { timeoutMs: 10000 })
     : await fillIfVisible(page, emailSel, email, { timeoutMs: 10000 });
   if (!filledAccount) {
-    console.log('[Login] Could not fill account field. Page text:', (await page.evaluate(() => document.body.innerText.substring(0, 300))).catch(() => 'eval error'));
+    try {
+      const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
+      console.log('[Login] Could not fill account field. Page text:', text);
+    } catch (e) {
+      console.log('[Login] Could not fill account field. Eval error:', e.message);
+    }
     return false;
   }
 
   await clickButtonByText(page, ['Continue', 'Sign in', 'Sign In', 'Next'], { timeoutMs: 10000 });
-  console.log('[Login] After account step. URL:', (await page.evaluate(() => document.location.href)).catch(() => 'eval error'));
+  try {
+    const url = await page.evaluate(() => document.location.href);
+    console.log('[Login] After account step. URL:', url);
+  } catch (e) {
+    console.log('[Login] After account step. Eval error:', e.message);
+  }
 
   // Password step.
   if (password) {
     const filledPassword = await fillIfVisible(page, 'input[type="password"]', password, { timeoutMs: 15000 });
     if (filledPassword) {
       await clickButtonByText(page, ['Sign in', 'Sign In', 'Login', 'Continue', 'Verify'], { timeoutMs: 10000 });
-      console.log('[Login] After password step. URL:', (await page.evaluate(() => document.location.href)).catch(() => 'eval error'));
+      try {
+        const url = await page.evaluate(() => document.location.href);
+        console.log('[Login] After password step. URL:', url);
+      } catch (e) {
+        console.log('[Login] After password step. Eval error:', e.message);
+      }
     } else {
-      console.log('[Login] Could not fill password field. Page text:', (await page.evaluate(() => document.body.innerText.substring(0, 300))).catch(() => 'eval error'));
+      try {
+        const text = await page.evaluate(() => document.body.innerText.substring(0, 300));
+        console.log('[Login] Could not fill password field. Page text:', text);
+      } catch (e) {
+        console.log('[Login] Could not fill password field. Eval error:', e.message);
+      }
     }
   }
 
@@ -469,7 +493,12 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
         await clickButtonByText(page, ['Verify', 'Continue', 'Sign in', 'Login'], { timeoutMs: 5000 });
       }
     } else {
-      console.log('[Login] OTP field not found. Page text:', (await page.evaluate(() => document.body.innerText.substring(0, 500))).catch(() => 'eval error'));
+      try {
+        const text = await page.evaluate(() => document.body.innerText.substring(0, 500));
+        console.log('[Login] OTP field not found. Page text:', text);
+      } catch (e) {
+        console.log('[Login] OTP field not found. Eval error:', e.message);
+      }
     }
   }
 

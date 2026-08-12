@@ -375,7 +375,9 @@ const OTP_FIELD_SELECTORS = [
   'input[inputmode="numeric"]',
   'input[placeholder*="code" i]',
   'input[placeholder*="otp" i]',
-  'input[placeholder*="verification" i]'
+  'input[placeholder*="verification" i]',
+  'input[type="text"]',
+  'input[type="number"]'
 ].join(', ');
 
 const RECAPTCHA_SELECTORS = [
@@ -428,15 +430,22 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
   const filledAccount = usePhone
     ? await fillIfVisible(page, phoneSel, email, { timeoutMs: 10000 })
     : await fillIfVisible(page, emailSel, email, { timeoutMs: 10000 });
-  if (!filledAccount) return false;
+  if (!filledAccount) {
+    console.log('[Login] Could not fill account field. Page text:', (await page.evaluate(() => document.body.innerText.substring(0, 300))).catch(() => 'eval error'));
+    return false;
+  }
 
   await clickButtonByText(page, ['Continue', 'Sign in', 'Sign In', 'Next'], { timeoutMs: 10000 });
+  console.log('[Login] After account step. URL:', (await page.evaluate(() => document.location.href)).catch(() => 'eval error'));
 
   // Password step.
   if (password) {
     const filledPassword = await fillIfVisible(page, 'input[type="password"]', password, { timeoutMs: 15000 });
     if (filledPassword) {
       await clickButtonByText(page, ['Sign in', 'Sign In', 'Login', 'Continue', 'Verify'], { timeoutMs: 10000 });
+      console.log('[Login] After password step. URL:', (await page.evaluate(() => document.location.href)).catch(() => 'eval error'));
+    } else {
+      console.log('[Login] Could not fill password field. Page text:', (await page.evaluate(() => document.body.innerText.substring(0, 300))).catch(() => 'eval error'));
     }
   }
 
@@ -459,6 +468,8 @@ async function autoFillLoginCredentials(page, { email, password, otp, recaptchaT
       if (filledCode) {
         await clickButtonByText(page, ['Verify', 'Continue', 'Sign in', 'Login'], { timeoutMs: 5000 });
       }
+    } else {
+      console.log('[Login] OTP field not found. Page text:', (await page.evaluate(() => document.body.innerText.substring(0, 500))).catch(() => 'eval error'));
     }
   }
 

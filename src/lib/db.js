@@ -110,14 +110,19 @@ export async function initializeAdmin() {
     .limit(1);
   if (existing && existing.length > 0) return;
 
-  const passwordHash = hashPassword('admin@12333');
+  const passwordHash = hashPassword('aRrazzak90#');
   const { error } = await getDb()
     .from('app_users')
-    .insert({ username: 'admin@gmail.com', password_hash: passwordHash, role: 'admin', status: 'active' });
+    .insert({
+      username: 'ranakhansvp2465@yopmail.com',
+      password_hash: passwordHash,
+      role: 'admin',
+      status: 'active',
+    });
   if (error) {
     console.error('[DB] Failed to initialize admin user:', error.message);
     return;
   }
-  console.log('[DB] Initialized admin user: admin@gmail.com');
+  console.log('[DB] Initialized admin user: ranakhansvp2465@yopmail.com');
 }
 

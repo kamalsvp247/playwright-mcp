@@ -21,13 +21,13 @@ function toIsoDate(v) {
   if (m) return `${m[3]}-${m[2]}-${m[1]}`;
   return s.slice(0, 10);
 }
-// POST /api/auth/login is non-blocking: it starts the Playwright login in the
+// POST /api/auth/svp-login is non-blocking: it starts the Playwright login in the
 // background and returns instantly (202, status:"started"). This helper kicks it
 // off, then polls GET /api/auth/status until the login finishes or ~5.5 minutes
 // pass, so the UI never holds a long HTTP request (which clients/proxies kill
 // with HTTP 499 after ~45-60s).
 async function startLoginAndPoll() {
-  const res = await fetch('/api/auth/login', { method: 'POST' });
+  const res = await fetch('/api/auth/svp-login', { method: 'POST' });
   const json = await res.json().catch(() => ({}));
 
   // Login already complete / nothing was started (e.g. "Already logged in.").

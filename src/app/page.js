@@ -316,7 +316,7 @@ function LoginPanel({ onLogin, onDisconnect, authStatus, setAuthStatus, compact 
             <div className="w-3 h-3 border-[1.5px] border-white/30 border-t-white rounded-full animate-spin" />
             Waiting...
           </span>
-        ) : 'Login'}
+        ) : 'Open SVP Sign-In'}
       </button>
     </div>
   );
@@ -1405,11 +1405,11 @@ export default function Home() {
                 {datesError && (
                   <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                    <span className="flex-1">Couldn&apos;t load exam dates: {datesError}</span>
+                    <span className="flex-1">Couldn&apos;t load exam dates: {datesError}{/authenticated/i.test(datesError) && <span className="mt-1 block text-[11px] text-slate-500">Choose Open SVP Sign-In to enter your credentials on the official SVP page.</span>}</span>
                     {/authenticated/i.test(datesError) && (
                       <button type="button" onClick={handleSvpSignIn} disabled={svpLoginLoading}
                         className="shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20 disabled:opacity-60">
-                        {svpLoginLoading ? <span className="flex items-center gap-1.5"><div className="w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />Signing in...</span> : 'Sign in to SVP'}
+                        {svpLoginLoading ? <span className="flex items-center gap-1.5"><div className="w-3 h-3 border-2 border-emerald-400/30 border-t-emerald-400 rounded-full animate-spin" />Opening SVP sign-in...</span> : 'Open SVP Sign-In'}
                       </button>
                     )}
                     <button type="button" onClick={() => { setDatesError(''); setDatesReloadKey(k => k + 1); }} className="shrink-0 rounded-lg border border-red-500/30 bg-red-500/10 px-2.5 py-1 font-semibold text-red-300 transition-colors hover:bg-red-500/20">Retry</button>

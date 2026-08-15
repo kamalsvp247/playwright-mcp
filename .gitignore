@@ -38,6 +38,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local runtime credentials and database
+.svp-token.json
+.svp-storage.json
+/data/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

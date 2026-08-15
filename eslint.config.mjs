@@ -10,6 +10,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    ".svp-bundles/**",
+    ".svp-local-bundle.js",
+    "_app-bundle.js",
   ]),
 ]);
 

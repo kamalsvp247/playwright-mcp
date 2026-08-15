@@ -33,7 +33,7 @@ export function withAnyRole(allowedRoles) {
   });
 }
 
-export function logRequest(action) {
+export function logRequest(action, handler) {
   return (request, ...args) => {
     const result = handler(request, ...args);
     const userId = request.user?.id || null;

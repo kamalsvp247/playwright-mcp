@@ -1,4 +1,5 @@
 import { sessionManager } from './session-manager.js';
+import { getToken, authenticatedFetch } from './svp-playwright.js';
 
 const API_BASE = 'https://svp-international-api.pacc.sa/api/v1';
 const BANGLADESH_ID = 78;
